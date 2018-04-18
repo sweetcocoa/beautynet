@@ -10,7 +10,8 @@ from tqdm import tqdm
 from utils import image_preprocess
 import glob
 import torchvision.datasets.folder as folder
-
+import matplotlib.pyplot as plt
+from torch.autograd import Variable
 
 class args:
     seed = 1
@@ -52,12 +53,17 @@ def inference_image(fa, net, path):
 
     personal = torch.FloatTensor([0, 0, 0, 0]).unsqueeze(0)
 
-    with torch.no_grad():
-        ch4img = ch4img.cuda()
-        personal = personal.cuda()
-        score = net(ch4img, personal)
+    ch4img = Variable(ch4img, volatile=True).cuda()
+    personal = Variable(personal, volatile=True).cuda()
+    score = net(ch4img, personal)
+    return score.data[0]
 
-    return score.item()
+    # with torch.no_grad():
+    #     ch4img = ch4img.cuda()
+    #     personal = personal.cuda()
+    #     score = net(ch4img, personal)
+    #
+    # return score.item()
 
 
 def get_bottleneck_of_image(fa, net, path, layer=0):
@@ -94,12 +100,117 @@ def get_bottleneck_of_image(fa, net, path, layer=0):
         cropped_ch4img.append(ch4img)
 
     cropped_ch4img = torch.FloatTensor(cropped_ch4img)
-    with torch.no_grad():
-        personal = torch.zeros(len(cropped_ch4img), 4).cuda()
-        cropped_ch4img = cropped_ch4img.cuda()
-        bottleneck = net.get_bottleneck(cropped_ch4img, personal, layer=1)
+    # with torch.no_grad():
+    #     personal = torch.zeros(len(cropped_ch4img), 4).cuda()
+    #     cropped_ch4img = cropped_ch4img.cuda()
+    #     bottleneck = net.get_bottleneck(cropped_ch4img, personal, layer=layer)
+
+    personal = Variable(torch.zeros(len(cropped_ch4img), 4), volatile=True).cuda()
+    cropped_ch4img = Variable(cropped_ch4img, volatile=True).cuda()
+    bottleneck = net.get_bottleneck(cropped_ch4img, personal, layer=layer)
+
 
     return bottleneck.cpu().data
+
+
+def show_img_and_landmarks(fa, img):
+    """
+    numpy image array -> landmark + image
+    return landmark (68 x 2)
+    """
+    fig = plt.figure()
+    ax = fig.add_subplot(121)
+    ax.imshow(img)
+    ax = fig.add_subplot(122)
+    ax.imshow(img)
+    markersize = 1
+    preds = fa.get_landmarks(img)[0]
+    # 턱선
+    ax.plot(preds[0:17,0],preds[0:17,1],marker='o',markersize=markersize,linestyle='-',color='w',lw=2)
+    # 오른눈썹
+    ax.plot(preds[17:22,0],preds[17:22,1],marker='o',markersize=markersize,linestyle='-',color='w',lw=2)
+    # 왼눈썹
+    ax.plot(preds[22:27,0],preds[22:27,1],marker='o',markersize=markersize,linestyle='-',color='w',lw=2)
+    # 콧대
+    ax.plot(preds[27:31,0],preds[27:31,1],marker='o',markersize=markersize,linestyle='-',color='w',lw=2)
+    # 콧구멍라인
+    ax.plot(preds[31:36,0],preds[31:36,1],marker='o',markersize=markersize,linestyle='-',color='w',lw=2)
+    # 오른눈
+    ax.plot(preds[36:42,0],preds[36:42,1],marker='o',markersize=markersize,linestyle='-',color='w',lw=1)
+    # 왼눈
+    ax.plot(preds[42:48,0],preds[42:48,1],marker='o',markersize=markersize,linestyle='-',color='w',lw=2)
+    # 입술 밖
+    ax.plot(preds[48:60,0],preds[48:60,1],marker='o',markersize=markersize,linestyle='-',color='w',lw=2)
+    # 입술 안
+    ax.plot(preds[60:68,0],preds[60:68,1],marker='o',markersize=markersize,linestyle='-',color='w',lw=2)
+    ax.axis('off')
+    return preds
+
+
+def get_landmarks_multiple_images(fa, images):
+    """
+    :param input_image: expected numpy array
+    :return:
+        This function is copied from face_alignment_net library's api.
+        To process images using mini-batch (to speed up inference)
+    """
+
+
+    # face detect는 batch화 가능하지 않은지?
+    # dlib, cnn 기반
+    dfaces = []
+    prev_face = None
+    for i, image in enumerate(images):
+        detected_face = fa.detect_faces(image)
+        if len(detected_face) > 0:
+            print(f"Warning : No faces were detected : {i}th image of images")
+            if prev_face is None:
+                prev_face = 1
+            elif (isinstance(prev_face, int)):
+                prev_face += 1
+            else:
+                detected_face = prev_face
+        else:
+
+
+            continue
+
+
+    if len(detected_faces) > 0:
+        landmarks = []
+        for i, d in enumerate(detected_faces):
+            if i > 0 and not all_faces:
+                break
+            if self.enable_cuda or self.use_cnn_face_detector:
+                d = d.rect
+
+            center = torch.FloatTensor(
+                [d.right() - (d.right() - d.left()) / 2.0, d.bottom() -
+                 (d.bottom() - d.top()) / 2.0])
+            center[1] = center[1] - (d.bottom() - d.top()) * 0.12
+            scale = (d.right() - d.left() + d.bottom() - d.top()) / 195.0
+
+            inp = crop(image, center, scale)
+            inp = torch.from_numpy(inp.transpose(
+                (2, 0, 1))).float().div(255.0).unsqueeze_(0)
+
+            if self.enable_cuda:
+                inp = inp.cuda()
+
+            out = self.face_alignemnt_net(
+                Variable(inp, volatile=True))[-1].data.cpu()
+            if self.flip_input:
+                out += flip(self.face_alignemnt_net(Variable(flip(inp),
+                                                             volatile=True))[-1].data.cpu(), is_label=True)
+
+            pts, pts_img = get_preds_fromhm(out, center, scale)
+            pts, pts_img = pts.view(68, 2) * 4, pts_img.view(68, 2)
+            landmarks.append(pts_img.numpy())
+    else:
+        print("Warning: No faces were detected.")
+        return None
+
+    return landmarks
 
 
 def main():

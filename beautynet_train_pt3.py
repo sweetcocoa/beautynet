@@ -17,11 +17,11 @@ from tqdm import tqdm
 
 class args:
     seed = 1
-    num_train = 4000
+    num_train = 3200
     batch_size = 32
-    epochs = 50
-    checkpoint = "./checkpoints/beautynet_04172206_no_person_no_valid"
-    pretrained = False
+    epochs = 25
+    checkpoint = "./checkpoints/beautynet_04181047_no_person"
+    pretrained = True
 
 
 def set_seeds(seed: int):
@@ -36,14 +36,14 @@ def get_valid_loss(beautynet, criterion, valid_loader):
     # beautynet.eval()
     valid_loss = 0
     accurate = 0
-    with torch.no_grad():
-        for step, (img, landmark, sex, score) in enumerate(valid_loader):
-            ch4img = torch.cat([img, landmark], dim=1)
-            ch4img, sex, score = ch4img.cuda(), sex.cuda(), score.cuda()
-            pred_score = beautynet(ch4img, sex)
-            loss = criterion(pred_score, score)
-            valid_loss += loss.item() * len(img)
-        # accurate += (score == pred_score.max(dim=1)[1]).sum().item()
+
+    for step, (img, landmark, sex, score) in enumerate(valid_loader):
+        ch4img = torch.cat([img, landmark], dim=1)
+        ch4img, sex, score = Variable(ch4img, volatile=True).cuda(), Variable(sex, volatile=True).cuda(), Variable(score, volatile=True).cuda()
+        pred_score = beautynet(ch4img, sex)
+        loss = criterion(pred_score, score)
+        valid_loss += loss.cpu().data[0] * len(img)
+    # accurate += (score == pred_score.max(dim=1)[1]).sum().item()
     beautynet.train(True)
     return valid_loss / (len(valid_loader.dataset) + 1), accurate / len(valid_loader.dataset)
 
@@ -60,14 +60,15 @@ def train(net, optimizer, criterion, train_loader):
     for step, (img, landmarks, sex, score) in enumerate(train_loader):
         # print(img.shape, landmarks.shape, sex.shape)
         ch4img = torch.cat([img, landmarks], dim=1)
-        ch4img, sex, score = ch4img.cuda(), sex.cuda(), score.cuda()
+        # ch4img, sex, score = ch4img.cuda(), sex.cuda(), score.cuda()
+        ch4img, sex, score = Variable(ch4img).cuda(), Variable(sex).cuda(), Variable(score).cuda()
         optimizer.zero_grad()
         net.zero_grad()
         pred_score = net(ch4img, sex)
         loss = criterion(pred_score, score)
         loss.backward()
         optimizer.step()
-        avg_loss += loss.item() * len(ch4img)
+        avg_loss += loss.cpu().data[0] * len(ch4img)
 
     return avg_loss
 
@@ -132,7 +133,7 @@ def main():
 
     for epoch in tqdm(range(start_epoch + 1, start_epoch + args.epochs + 1)):
         avg_loss = train(net, optimizer, criterion, train_loader)
-        if epoch > 29:
+        if epoch % 1 == 0:
             val_loss, accuracy = get_valid_loss(net, criterion, valid_loader)
             is_best = val_loss < best_val_loss
             best_val_loss = val_loss if is_best else best_val_loss
@@ -149,35 +150,34 @@ def main():
 
     net.eval()
 
-    with torch.no_grad():
+    pred_list = []
+    for step, (img, landmark, sex, score) in enumerate(valid_loader):
+        ch4img = torch.cat([img, landmark], dim=1)
+        ch4img, sex, score = Variable(ch4img, volatile=True).cuda(), Variable(sex, volatile=True).cuda(), Variable(score, volatile=True).cuda()
+        pred_score = net(ch4img, sex)
+        for i in range(len(img)):
+            pred_list.append(pred_score[i].cpu().data[0])
+            if abs(score[i].cpu().data[0] - pred_score[i].cpu().data[0]) < 0.2:
+                res = True
+            else:
+                res = False
+            print(f"valid true score{score[i].cpu().data[0]:.4f}, pred score{pred_score[i].cpu().data[0]:.4f} result {res}" )
 
-        pred_list = []
-        for step, (img, landmark, sex, score) in enumerate(valid_loader):
-            ch4img = torch.cat([img, landmark], dim=1)
-            ch4img, sex, score = ch4img.cuda(), sex.cuda(), score.cuda()
-            pred_score = net(ch4img, sex)
-            for i in range(len(img)):
-                pred_list.append(pred_score[i].item())
-                if abs(score[i].item() - pred_score[i].item()) < 0.2:
-                    res = True
-                else:
-                    res = False
-                print(f"valid true score{score[i].item():.4f}, pred score{pred_score[i].item():.4f} result {res}" )
+    result_valid = pd.Series(data=pred_list)
 
-        result_valid = pd.Series(data=pred_list)
-
-        pred_list = []
-        for step, (img, landmark, sex, score) in enumerate(train_loader):
-            ch4img = torch.cat([img, landmark], dim=1)
-            ch4img, sex, score = ch4img.cuda(), sex.cuda(), score.cuda()
-            pred_score = net(ch4img, sex)
-            for i in range(len(img)):
-                pred_list.append(pred_score[i].item())
-                if abs(score[i].item() - pred_score[i].item()) < 0.2:
-                    res = True
-                else:
-                    res = False
-                print(f"train true score{score[i].item():.4f}, pred score{pred_score[i].item():.4f} result {res}" )
+    pred_list = []
+    for step, (img, landmark, sex, score) in enumerate(train_loader):
+        ch4img = torch.cat([img, landmark], dim=1)
+        ch4img, sex, score = Variable(ch4img, volatile=True).cuda(), Variable(sex, volatile=True).cuda(), Variable(score, volatile=True).cuda()
+        pred_score = net(ch4img, sex)
+        for i in range(len(img)):
+            pred_list.append(pred_score[i].cpu().data[0])
+            if abs(score[i].cpu().data[0] - pred_score[i].cpu().data[0]) < 0.2:
+                res = True
+            else:
+                res = False
+                print(
+                    f"valid true score{score[i].cpu().data[0]:.4f}, pred score{pred_score[i].cpu().data[0]:.4f} result {res}")
 
     result_test = pd.Series(data=pred_list)
     true_valid = valid_dataset['Rating']

@@ -67,6 +67,27 @@ class ResNet4Channel(nn.Module):
 
         return x
 
+    def get_bottleneck(self, x, layer=2):
+        x = self.conv1(x)
+        x = self.bn1(x)
+        x = self.relu(x)
+        x = self.maxpool(x)
+        if layer > 0:
+            x = self.layer1(x)
+        if layer > 1:
+            x = self.layer2(x)
+        if layer > 2:
+            x = self.layer3(x)
+        if layer > 3:
+            x = self.layer4(x)
+        if layer > 4:
+            x = self.avgpool(x)
+            x = x.view(x.size(0), -1)
+        if layer > 5:
+            x = self.fc(x)
+        x = x.view(x.size(0), -1)
+        return x
+
 
 class BeautyNet(nn.Module):
     def __init__(self, block, layers, num_classes=60):
@@ -98,14 +119,32 @@ class BeautyNet(nn.Module):
         return x
 
     def get_bottleneck(self, img, sex=None, layer=0):
-        x = self.resnet(img)
-        if layer == 0:
+        """
+        :param img:
+        :param sex:
+        :param layer:
+        음수이면 resnet에서 뽑음.
+        양수이면 scorenet에서 뽑음.
+        :return:
+        """
+        if layer < 0:
+            layer = -layer
+            x = self.resnet.get_bottleneck(img, layer)
             return x
-        x = torch.cat([x, sex], dim=1)
-        if layer == 1:
+        else:
+            x = self.resnet(img)
+            if layer == 0:
+                return x
+            x = torch.cat([x, sex], dim=1)
             x = self.scorenet.linear1(x)
-            return x
-        elif layer == 2:
+
+            if layer == 1:
+                return x
+
+            x = self.scorenet.relu1(x)
             x = self.scorenet.linear2(x)
+            if layer == 2:
+                return x
+            x = self.scorenet.relu2(x)
+            x = self.scorenet.linear3(x)
             return x
-        return x
