@@ -11,6 +11,14 @@ from face_alignment.utils import crop
 import torch
 
 
+def get_center_scale_from_rectangle(d):
+    center = torch.FloatTensor(
+        [d[2] - (d[2] - d[0]) / 2.0,
+         d[3] - (d[3] - d[1]) / 2.0])
+    center[1] = center[1] - (d[3] - d[1]) * 0.12
+    scale = (d[2] - d[0] + d[3] - d[1]) / 195.0
+    return center, scale
+
 def get_cropped_sample(fa, sample):
     """
     :param fa: face_alignment
