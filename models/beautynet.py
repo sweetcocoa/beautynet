@@ -3,7 +3,6 @@ import torch.nn as nn
 import math
 from collections import OrderedDict
 
-
 class ResNet4Channel(nn.Module):
     """
     Original source : torchvision.models.resnet

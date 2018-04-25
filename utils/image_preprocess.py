@@ -1,5 +1,5 @@
 import face_alignment
-from PIL import Image
+from PIL import Image, ImageEnhance
 import torch.utils.data as data
 import torchvision.datasets.folder as folder
 import numpy as np
@@ -9,6 +9,31 @@ import math
 import face_alignment
 from face_alignment.utils import crop
 import torch
+import random
+
+
+def RandomEnhanceBrightness(img):
+    factor = random.gauss(1, 0.2)
+    factor = np.clip(factor, 0.7, 1.3)
+    return ImageEnhance.Brightness(img).enhance(factor)
+
+
+def RandomEnhanceColor(img):
+    factor = random.gauss(1, 0.2)
+    factor = np.clip(factor, 0., 1.5)
+    return ImageEnhance.Color(img).enhance(factor)
+
+
+def RandomEnhanceContrast(img):
+    factor = random.gauss(1, 0.2)
+    factor = np.clip(factor, 0.8, 2)
+    return ImageEnhance.Contrast(img).enhance(factor)
+
+
+def RandomEnhanceSharpness(img):
+    factor = random.gauss(1, 0.3)
+    factor = np.clip(factor, -1, 5)
+    return ImageEnhance.Sharpness(img).enhance(factor)
 
 
 def get_center_scale_from_rectangle(d):
@@ -19,29 +44,34 @@ def get_center_scale_from_rectangle(d):
     scale = (d[2] - d[0] + d[3] - d[1]) / 195.0
     return center, scale
 
+
 def get_cropped_sample(fa, sample):
     """
     :param fa: face_alignment
-    :param sample: 3-channel numpy array image, Size > 224 x 224.
-    :return: 350 x 350 x 3 numpy image
+    :param sample: 3-channel numpy array image, Size > 195 x 195.
+    :return: 256 x 256 x 3 numpy image
     """
     d = fa.face_detector(sample)
+
     if len(d) == 0:
         return None
-    d = d.pop().rect
+
+    if fa.enable_cuda:
+        d = d.pop().rect
+    else:
+        d = d.pop()
 
     center = torch.FloatTensor(
         [d.right() - (d.right() - d.left()) / 2.0, d.bottom() - (d.bottom() - d.top()) / 2.0])
     center[1] = center[1] - (d.bottom() - d.top()) * 0.12
-    scale = (d.right() - d.left() + d.bottom() - d.top()) / 224.0
-    img_crop = crop(sample, center, scale, resolution=350)
+    scale = (d.right() - d.left() + d.bottom() - d.top()) / 195.0
+    img_crop = crop(sample, center, scale, resolution=256)
     return img_crop
 
 
 def get_landmarks(fa, img):
     """
     :param fa: face_alignment
-    :param img: 350 x 350 x 3 numpy image
     :return: 68x2 2d landmark coord.
     """
     ret = fa.get_landmarks(img)

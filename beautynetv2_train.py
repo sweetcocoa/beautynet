@@ -1,28 +1,27 @@
 import torch
 from skimage import io
-import face_alignment
 import os
 import pandas as pd
 import numpy as np
-import torchvision
 import torchvision.transforms as transforms
 import datasets.beautydataset as beautydataset
 import torch.nn as nn
 import torch.optim as optim
-from torch.autograd import Variable
 import models.beautynetv2 as beautynetv2
 import random
 from tqdm import tqdm
+import utils.image_preprocess as image_preprocess
+from PIL import Image
 
 
 class args:
     seed = 1
     num_train = 3200
-    batch_size = 16
-    epochs = 50
-    checkpoint = "./checkpoints/beautynetv2_04241643"
-    pretrained = False
-
+    batch_size = 32
+    epochs = 0
+    checkpoint = "./checkpoints/beautynetv2_04251556.best"
+    pretrained = True
+    device = torch.device("cuda") if torch.cuda.is_available() else "cpu"
 
 def set_seeds(seed: int):
     torch.manual_seed(seed)
@@ -40,11 +39,13 @@ def get_valid_loss(beautynet, criterion, valid_loader):
         return 0, 0
 
     for step, (img, heatmap, score) in enumerate(valid_loader):
-        img, heatmap, score = Variable(img, volatile=True).cuda(), Variable(heatmap, volatile=True).cuda(), Variable(score, volatile=True).cuda()
+        # img, heatmap, score = Variable(img, volatile=True).cuda(), Variable(heatmap, volatile=True).cuda(), Variable(score, volatile=True).cuda()
+        img, heatmap, score = img.to(args.device), heatmap.to(args.device), score.to(args.device)
         pred_score = beautynet(img, heatmap)
         loss = criterion(pred_score, score)
-        valid_loss += loss.cpu().data[0] * len(img)
+        valid_loss += loss.item() * len(img)
     # accurate += (score == pred_score.max(dim=1)[1]).sum().item()
+
     beautynet.train(True)
     return valid_loss / (len(valid_loader.dataset)), accurate / len(valid_loader.dataset)
 
@@ -59,14 +60,15 @@ def train(net, optimizer, criterion, train_loader):
     net.train(True)
     avg_loss = 0
     for step, (img, heatmap, score) in enumerate(train_loader):
-        img, heatmap, score = Variable(img).cuda(), Variable(heatmap).cuda(), Variable(score).cuda()
+        img.requires_grad_(), heatmap.requires_grad_()
+        img, heatmap, score = img.to(args.device), heatmap.to(args.device), score.to(args.device)
         optimizer.zero_grad()
         net.zero_grad()
         pred_score = net(img, heatmap)
         loss = criterion(pred_score, score)
         loss.backward()
         optimizer.step()
-        avg_loss += loss.cpu().data[0] * len(img)
+        avg_loss += loss.item() * len(img)
 
     return avg_loss
 
@@ -78,24 +80,27 @@ def load_model(net, optimizer, path):
     optimizer.load_state_dict(saved_dict['optimizer.state_dict'])
     epoch = saved_dict['epoch']
     best_val_loss = saved_dict['best_val_loss']
+    print(f"epoch {epoch}, best_val_loss{best_val_loss}")
     return net, criterion, optimizer, epoch, best_val_loss
 
 
 def eval_model(net, loader, prefix="valid"):
     net.eval()
+
     pred_list = []
     results = 0
-    for step, (img, heatmap, score) in enumerate(loader):
-        img, heatmap, score = Variable(img, volatile=True).cuda(), Variable(heatmap, volatile=True).cuda(), Variable(score, volatile=True).cuda()
-        pred_score = net(img, heatmap)
-        for i in range(len(img)):
-            pred_list.append(pred_score[i].cpu().data[0])
-            if abs(score[i].cpu().data[0] - pred_score[i].cpu().data[0]) < 0.2:
-                res = True
-                results += 1
-            else:
-                res = False
-            print(f"{prefix} true score{score[i].cpu().data[0]:.4f}, pred score{pred_score[i].cpu().data[0]:.4f} result {res}" )
+    with torch.no_grad():
+        for step, (img, heatmap, score) in enumerate(loader):
+            img, heatmap, score = img.to(args.device), heatmap.to(args.device), score.to(args.device)
+            pred_score = net(img, heatmap)
+            for i in range(len(img)):
+                pred_list.append(pred_score[i].item())
+                if abs(score[i].item() - pred_score[i].item()) < 0.2:
+                    res = True
+                    results += 1
+                else:
+                    res = False
+                print(f"{prefix} true score{score[i].item():.4f}, pred score{pred_score[i].item():.4f} result {res}" )
     result_valid = pd.Series(data=pred_list)
 
     return result_valid, results
@@ -110,6 +115,11 @@ def main():
     transform = transforms.Compose([
         # transforms.RandomResizedCrop(350, scale=(0.5, 1.0), ratio=(1., 1.)),
         # transforms.RandomHorizontalFlip(),
+        Image.fromarray,
+        image_preprocess.RandomEnhanceBrightness,
+        image_preprocess.RandomEnhanceColor,
+        image_preprocess.RandomEnhanceContrast,
+        image_preprocess.RandomEnhanceSharpness,
         transforms.ToTensor(),
         # torch.FloatTensor,
         # transforms.Normalize(mean=[174.5856, 152.9040, 145.1345], std=[82.1571, 84.6071,  87.3680]),   # RGB mean, std.
@@ -175,7 +185,7 @@ def main():
     true_train = train_dataset['Rating']
     import matplotlib.pyplot as plt
 
-    plt.hist([result_valid, result_train, true_valid, true_train], color=['blue', 'green', 'orange', 'red'], bins=10, normed=True)
+    plt.hist([result_valid, result_train, true_valid, true_train], color=['blue', 'green', 'orange', 'red'], bins=10, normed=False)
     plt.savefig(args.checkpoint + ".result.png")
 
 

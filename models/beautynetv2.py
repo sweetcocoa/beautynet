@@ -10,7 +10,7 @@ import torchvision
 
 class BeautyNetV2(nn.Module):
     """
-    Input : 256 x 256 Face image, 68 x 64 x 64 facial landmark heatmap got from FAN
+    Input : 256 x 256 Face image, 68 x 64 x 64 facial landmark heatmap from FAN - face alignment network
     Output :
     """
 
@@ -35,6 +35,7 @@ class BeautyNetV2(nn.Module):
         x2 = self.landmarknet(heatmap)
         x = torch.cat([x1, x2], dim=1)
         x = self.scorenet(x)
+        x = x.view(x.size(0))
         return x
 
 

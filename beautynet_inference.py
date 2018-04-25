@@ -30,43 +30,27 @@ def load_model(net : beautynet.BeautyNet, path : str):
 
 
 def inference_image(fa, net, path):
-    img = folder.default_loader(path)
+    if isinstance(path, str):
+        img = folder.default_loader(path)
+    else:
+        img = path
 
     img_crop = image_preprocess.get_cropped_sample(fa, np.array(img))
     if img_crop is None:
         return 0
 
-    preds = fa.get_landmarks(img_crop)[0]
-    lanimg = image_preprocess.get_landmark_to_img(preds)
-    transform = transforms.Compose([
-        torch.FloatTensor,
-        transforms.Normalize(mean=[174.5856, 152.9040, 145.1345], std=[82.1571, 84.6071,  87.3680]),   # RGB mean, std.
-    ])
+    inp = torch.tensor(img_crop.transpose(2,0,1)).float().div(255.0).unsqueeze(0)
 
-    img_crop_t = img_crop.transpose([2,0,1])
-    img_crop_t = transform(img_crop_t)
+    if fa.enable_cuda:
+        inp = inp.cuda()
 
-    lanimg = torch.FloatTensor(lanimg.astype(np.float32))
+    landmark_heatmap = fa.face_alignemnt_net(inp)[-1].data
+    score = net(inp, landmark_heatmap)
 
-    # print(img_crop_t.shape, lanimg.shape)
-    ch4img = torch.cat([img_crop_t, lanimg], dim=0).unsqueeze(0)
-
-    personal = torch.FloatTensor([0, 0, 0, 0]).unsqueeze(0)
-
-    ch4img = Variable(ch4img, volatile=True).cuda()
-    personal = Variable(personal, volatile=True).cuda()
-    score = net(ch4img, personal)
-    return score.data[0]
-
-    # with torch.no_grad():
-    #     ch4img = ch4img.cuda()
-    #     personal = personal.cuda()
-    #     score = net(ch4img, personal)
-    #
-    # return score.item()
+    return score.item()
 
 
-def get_bottleneck_of_image(fa, net, path, layer=0):
+def get_bottleneck_of_image(fa, net, path, layer=0, preprocessed=True):
     """
     :param fa:
     :param net:
@@ -145,72 +129,6 @@ def show_img_and_landmarks(fa, img):
     ax.plot(preds[60:68,0],preds[60:68,1],marker='o',markersize=markersize,linestyle='-',color='w',lw=2)
     ax.axis('off')
     return preds
-
-
-def get_landmarks_multiple_images(fa, images):
-    """
-    :param input_image: expected numpy array
-    :return:
-        This function is copied from face_alignment_net library's api.
-        To process images using mini-batch (to speed up inference)
-    """
-
-
-    # face detect는 batch화 가능하지 않은지?
-    # dlib, cnn 기반
-    dfaces = []
-    prev_face = None
-    for i, image in enumerate(images):
-        detected_face = fa.detect_faces(image)
-        if len(detected_face) > 0:
-            print(f"Warning : No faces were detected : {i}th image of images")
-            if prev_face is None:
-                prev_face = 1
-            elif (isinstance(prev_face, int)):
-                prev_face += 1
-            else:
-                detected_face = prev_face
-        else:
-
-
-            continue
-
-
-    if len(detected_faces) > 0:
-        landmarks = []
-        for i, d in enumerate(detected_faces):
-            if i > 0 and not all_faces:
-                break
-            if self.enable_cuda or self.use_cnn_face_detector:
-                d = d.rect
-
-            center = torch.FloatTensor(
-                [d.right() - (d.right() - d.left()) / 2.0, d.bottom() -
-                 (d.bottom() - d.top()) / 2.0])
-            center[1] = center[1] - (d.bottom() - d.top()) * 0.12
-            scale = (d.right() - d.left() + d.bottom() - d.top()) / 195.0
-
-            inp = crop(image, center, scale)
-            inp = torch.from_numpy(inp.transpose(
-                (2, 0, 1))).float().div(255.0).unsqueeze_(0)
-
-            if self.enable_cuda:
-                inp = inp.cuda()
-
-            out = self.face_alignemnt_net(
-                Variable(inp, volatile=True))[-1].data.cpu()
-            if self.flip_input:
-                out += flip(self.face_alignemnt_net(Variable(flip(inp),
-                                                             volatile=True))[-1].data.cpu(), is_label=True)
-
-            pts, pts_img = get_preds_fromhm(out, center, scale)
-            pts, pts_img = pts.view(68, 2) * 4, pts_img.view(68, 2)
-            landmarks.append(pts_img.numpy())
-    else:
-        print("Warning: No faces were detected.")
-        return None
-
-    return landmarks
 
 
 def main():
